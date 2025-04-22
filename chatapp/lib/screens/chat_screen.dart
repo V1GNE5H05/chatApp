@@ -55,6 +55,7 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+
   void _sendMessage(String message) {
     final timestamp = DateTime.now().toIso8601String();
     final messageData = {
