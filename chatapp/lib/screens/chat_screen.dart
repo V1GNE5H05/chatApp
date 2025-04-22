@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 
 class ChatScreen extends StatefulWidget {
   final String friendUid;
@@ -20,333 +22,329 @@ class ChatScreen extends StatefulWidget {
   _ChatScreenState createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateMixin {
+class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
-  final String serverUrl = 'ws://192.168.158.144:8080';
   late WebSocketChannel _webSocketChannel;
-  final currentUserUid = FirebaseAuth.instance.currentUser!.uid;
-  
-  // Animation controllers
-  late AnimationController _sendButtonController;
-  late Animation<double> _sendButtonScale;
-  late Animation<double> _micButtonOpacity;
-  late Animation<double> _sendButtonOpacity;
+  final String serverUrl = 'ws://192.168.158.144:8080';
+  final String currentUserUid = FirebaseAuth.instance.currentUser!.uid;
 
   @override
   void initState() {
     super.initState();
     _connectWebSocket();
-    _setupAnimations();
-  }
-
-  void _setupAnimations() {
-    _sendButtonController = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 300),
-    );
-
-    _sendButtonScale = Tween<double>(begin: 0.8, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _sendButtonController,
-        curve: Curves.easeInOutBack,
-      ),
-    );
-
-    _micButtonOpacity = Tween<double>(begin: 1.0, end: 0.0).animate(
-      CurvedAnimation(
-        parent: _sendButtonController,
-        curve: Curves.easeIn,
-      ),
-    );
-
-    _sendButtonOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _sendButtonController,
-        curve: Curves.easeOut,
-      ),
-    );
-
-    _messageController.addListener(_handleTextChange);
-  }
-
-  void _handleTextChange() {
-    if (_messageController.text.trim().isNotEmpty) {
-      _sendButtonController.forward();
-    } else {
-      _sendButtonController.reverse();
-    }
   }
 
   void _connectWebSocket() {
     _webSocketChannel = WebSocketChannel.connect(Uri.parse(serverUrl));
-
     _webSocketChannel.sink.add(jsonEncode({
       'type': 'auth',
       'uid': currentUserUid,
     }));
-
-    _webSocketChannel.stream.listen(
-      (message) {
-        final data = jsonDecode(message);
-        if (data['type'] == 'message' &&
-            data['receiver'] == currentUserUid &&
-            data['sender'] == widget.friendUid) {
-          _storeMessageInFirestore(
-            sender: data['sender'],
-            receiver: data['receiver'],
-            text: data['text'],
-            timestamp: DateTime.now().toIso8601String(),
-          );
-        }
-      },
-      onError: (error) {
-        print('WebSocket error: $error');
-        Future.delayed(Duration(seconds: 2), _connectWebSocket);
-      },
-      onDone: () {
-        print('WebSocket closed');
-        Future.delayed(Duration(seconds: 2), _connectWebSocket);
-      },
-    );
+    _webSocketChannel.stream.listen((message) {
+      final data = jsonDecode(message);
+      if (data['type'] == 'message') {
+        _storeMessageInFirestore(
+          sender: data['sender'],
+          receiver: data['receiver'],
+          text: data['text'],
+          timestamp: data['timestamp'],
+          isImage: data['isImage'] ?? false,
+        );
+         _updateFriendsCollection(data['sender'], data['receiver']);
+      }
+    });
   }
 
-  void _sendMessage() {
-    final text = _messageController.text.trim();
-    if (text.isEmpty) return;
+  void _sendMessage(String message) {
+    final timestamp = DateTime.now().toIso8601String();
+    final messageData = {
+      'type': 'message',
+      'sender': currentUserUid,
+      'receiver': widget.friendUid,
+      'text': message,
+      'timestamp': timestamp,
+    };
+    _webSocketChannel.sink.add(jsonEncode(messageData));
+    _storeMessageInFirestore(
+      sender: currentUserUid,
+      receiver: widget.friendUid,
+      text: message,
+      timestamp: timestamp,
+    );
+    _updateFriendsCollection(currentUserUid, widget.friendUid);
+
+  }
+
+  void _storeMessageInFirestore({
+    required String sender,
+    required String receiver,
+    required String text,
+    required String timestamp,
+    bool isImage = false,
+  }) {
+    FirebaseFirestore.instance.collection('messages').add({
+      'sender': sender,
+      'receiver': receiver,
+      'text': text,
+      'timestamp': Timestamp.fromDate(DateTime.parse(timestamp)),
+      'participants': [sender, receiver],
+      'isImage': isImage,
+    });
+  }
+  Future<void> _updateFriendsCollection(String senderUid, String receiverUid) async {
+  final firestore = FirebaseFirestore.instance;
+
+  // Update sender's friends list
+  final senderRef = firestore.collection('friends').doc(senderUid);
+  await senderRef.set({
+    'uids': FieldValue.arrayUnion([receiverUid])
+  }, SetOptions(merge: true));
+
+  // Update receiver's friends list
+  final receiverRef = firestore.collection('friends').doc(receiverUid);
+  await receiverRef.set({
+    'uids': FieldValue.arrayUnion([senderUid])
+  }, SetOptions(merge: true));
+}
+
+  @override
+  void dispose() {
+    _messageController.dispose();
+    _webSocketChannel.sink.close();
+    super.dispose();
+  }
+
+  String _formatTimestamp(Timestamp timestamp) {
+    final DateTime dateTime = timestamp.toDate();
+    return DateFormat('h:mm a').format(dateTime);
+  }
+
+  String _formatDateLabel(Timestamp timestamp) {
+    final DateTime date = timestamp.toDate();
+    final now = DateTime.now();
+    final difference = now.difference(date).inDays;
+    if (difference == 0) return 'Today';
+    if (difference == 1) return 'Yesterday';
+    return DateFormat('MMMM dd, yyyy').format(date);
+  }
+  Future<void> _pickAndSendImage() async {
+  final picker = ImagePicker();
+  final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+
+  if (pickedFile != null) {
+    final bytes = await pickedFile.readAsBytes();
+    final base64Image = base64Encode(bytes);
 
     final timestamp = DateTime.now().toIso8601String();
     final messageData = {
       'type': 'message',
       'sender': currentUserUid,
       'receiver': widget.friendUid,
-      'text': text,
+      'text': base64Image,
+      'isImage': true,
       'timestamp': timestamp,
     };
 
     _webSocketChannel.sink.add(jsonEncode(messageData));
+
     _storeMessageInFirestore(
       sender: currentUserUid,
       receiver: widget.friendUid,
-      text: text,
+      text: base64Image,
       timestamp: timestamp,
+      isImage: true,
     );
-    _messageController.clear();
   }
+}
 
-  Future<void> _storeMessageInFirestore({
-    required String sender,
-    required String receiver,
-    required String text,
-    required String timestamp,
-  }) async {
-    try {
-      await FirebaseFirestore.instance.collection('messages').add({
-        'sender': sender,
-        'receiver': receiver,
-        'text': text,
-        'timestamp': Timestamp.fromDate(DateTime.parse(timestamp)),
-        'participants': FieldValue.arrayUnion([sender, receiver]),
-      });
-    } catch (e) {
-      print('Error storing message: $e');
-    }
-  }
-
-  Stream<QuerySnapshot> _getMessageStream() {
-    return FirebaseFirestore.instance
+  Widget _buildMessageList() {
+    final sentMessagesQuery = FirebaseFirestore.instance
         .collection('messages')
-        .where('participants', arrayContains: currentUserUid)
-        .orderBy('timestamp', descending: false)
-        .snapshots();
-  }
+        .where('sender', isEqualTo: currentUserUid)
+        .where('receiver', isEqualTo: widget.friendUid);
 
-  String _formatDate(DateTime dateTime) {
-    return DateFormat('MMM d, yyyy').format(dateTime);
-  }
+    final receivedMessagesQuery = FirebaseFirestore.instance
+        .collection('messages')
+        .where('sender', isEqualTo: widget.friendUid)
+        .where('receiver', isEqualTo: currentUserUid);
 
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: Duration(milliseconds: 300),
-          curve: Curves.easeOut,
+    return StreamBuilder<QuerySnapshot>(
+      stream: sentMessagesQuery.snapshots(),
+      builder: (context, sentSnapshot) {
+        return StreamBuilder<QuerySnapshot>(
+          stream: receivedMessagesQuery.snapshots(),
+          builder: (context, receivedSnapshot) {
+            if (sentSnapshot.connectionState == ConnectionState.waiting ||
+                receivedSnapshot.connectionState == ConnectionState.waiting) {
+              return Center(child: CircularProgressIndicator());
+            }
+
+            final allMessages = [
+              ...?sentSnapshot.data?.docs,
+              ...?receivedSnapshot.data?.docs,
+            ];
+
+            allMessages.sort((a, b) {
+              return a['timestamp'].compareTo(b['timestamp']);
+            });
+
+            Map<String, List<QueryDocumentSnapshot>> groupedMessages = {};
+
+            for (var msg in allMessages) {
+              String dateLabel = _formatDateLabel(msg['timestamp']);
+              if (!groupedMessages.containsKey(dateLabel)) {
+                groupedMessages[dateLabel] = [];
+              }
+              groupedMessages[dateLabel]!.add(msg);
+            }
+
+            final dateKeys = groupedMessages.keys.toList();
+
+            return ListView.builder(
+              padding: EdgeInsets.all(8),
+              reverse: false,
+              itemCount: dateKeys.length,
+              itemBuilder: (context, dateIndex) {
+                String date = dateKeys[dateIndex];
+                List<QueryDocumentSnapshot> messages = groupedMessages[date]!;
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(
+                      child: Container(
+                        margin: EdgeInsets.symmetric(vertical: 12),
+                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.deepOrange.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          date,
+                          style: TextStyle(color: Colors.deepOrange[200]),
+                        ),
+                      ),
+                    ),
+                    ...messages.map((message) {
+                      final isMe = message['sender'] == currentUserUid;
+                      return Container(
+                        margin: EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          mainAxisAlignment: isMe
+                              ? MainAxisAlignment.end
+                              : MainAxisAlignment.start,
+                          children: [
+                            if (!isMe)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: CircleAvatar(
+                                  backgroundColor: Colors.deepOrange[800],
+                                  child: FaIcon(
+                                    FontAwesomeIcons.skull,
+                                    color: Colors.black,
+                                    size: 16,
+                                  ),
+                                ),
+                              ),
+                            Flexible(
+                              child: Container(
+                                margin: EdgeInsets.symmetric(horizontal: 12),
+                                padding: EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: isMe
+                                      ? Colors.deepOrange[700]
+                                      : Colors.grey[800],
+                                  borderRadius: BorderRadius.circular(16),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black26,
+                                      blurRadius: 4,
+                                      offset: Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    message['isImage'] == true
+                                    ? Image.memory(
+                                      base64Decode(message['text']),
+                                      width: 200,
+                                    )
+                                    : Text(
+                                      message['text'],
+                                      style: TextStyle(
+                                        color: isMe ? Colors.black : Colors.white,
+                                      ),
+                                    ),
+                                    SizedBox(height: 4),
+                                    Text(
+                                      _formatTimestamp(message['timestamp']),
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: isMe
+                                            ? Colors.black.withOpacity(0.6)
+                                            : Colors.grey[400],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ],
+                );
+              },
+            );
+          },
         );
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _messageController.removeListener(_handleTextChange);
-    _messageController.dispose();
-    _scrollController.dispose();
-    _webSocketChannel.sink.close();
-    _sendButtonController.dispose();
-    super.dispose();
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Color(0xFF1a1a1a),
+      backgroundColor: Color(0xFF1A1A1A),
       appBar: AppBar(
         backgroundColor: Colors.deepOrange[900],
         title: Row(
           children: [
             CircleAvatar(
               backgroundColor: Colors.deepOrange[700],
-              child: Icon(Icons.person, color: Colors.black),
+              child: FaIcon(FontAwesomeIcons.skull, color: Colors.black, size: 16),
             ),
             SizedBox(width: 12),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(widget.friendName, style: TextStyle(color: Colors.white)),
-                Text("Online", style: TextStyle(color: Colors.deepOrange[200], fontSize: 12)),
+                Text("Online",
+                    style: TextStyle(
+                      color: Colors.deepOrange[200],
+                      fontSize: 12,
+                    )),
               ],
             ),
           ],
         ),
         actions: [
           IconButton(
-            icon: FaIcon(FontAwesomeIcons.cloudArrowUp, color: Colors.deepOrange[100]),
+            icon: FaIcon(FontAwesomeIcons.ghost, color: Colors.deepOrange[100]),
             onPressed: () {},
           ),
-          PopupMenuButton(
-            icon: Icon(Icons.more_vert, color: Colors.deepOrange[100]),
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                child: Text("Clear chat", style: TextStyle(color: Colors.black87)),
-              ),
-            ],
+          IconButton(
+            icon: Icon(Icons.videocam, color: Colors.deepOrange[100]),
+            onPressed: () {},
           ),
         ],
       ),
       body: Column(
         children: [
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: _getMessageStream(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return Center(
-                    child: CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.deepOrange),
-                    ),
-                  );
-                }
-
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        FaIcon(FontAwesomeIcons.commentSlash, 
-                            color: Colors.deepOrange[300], size: 40),
-                        SizedBox(height: 16),
-                        Text(
-                          'No messages yet',
-                          style: TextStyle(
-                            color: Colors.deepOrange[200],
-                            fontSize: 18,
-                          ),
-                        ),
-                        Text(
-                          'Start the conversation',
-                          style: TextStyle(
-                            color: Colors.grey[600],
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                final messages = snapshot.data!.docs.where((doc) {
-                  final data = doc.data() as Map<String, dynamic>;
-                  return (data['sender'] == currentUserUid && data['receiver'] == widget.friendUid) ||
-                         (data['sender'] == widget.friendUid && data['receiver'] == currentUserUid);
-                }).toList();
-
-                if (messages.isEmpty) {
-                  return Center(
-                    child: Text(
-                      'No messages with this user',
-                      style: TextStyle(color: Colors.deepOrange[200]),
-                    ),
-                  );
-                }
-
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  _scrollToBottom();
-                });
-
-                String? lastDate;
-                return ListView.builder(
-                  controller: _scrollController,
-                  itemCount: messages.length,
-                  itemBuilder: (context, index) {
-                    final msg = messages[index];
-                    final data = msg.data() as Map<String, dynamic>;
-                    final isMe = data['sender'] == currentUserUid;
-                    final time = DateFormat('h:mm a').format((data['timestamp'] as Timestamp).toDate());
-                    final currentDate = _formatDate((data['timestamp'] as Timestamp).toDate());
-                    final showDate = currentDate != lastDate;
-                    lastDate = currentDate;
-
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (showDate)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            child: Center(
-                              child: Text(
-                                currentDate,
-                                style: TextStyle(color: Colors.deepOrange[200], fontSize: 12),
-                              ),
-                            ),
-                          ),
-                        Container(
-                          margin: EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-                          alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                          child: Container(
-                            padding: EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: isMe ? Colors.deepOrange[800] : Colors.grey[800],
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  data['text'],
-                                  style: TextStyle(
-                                    color: isMe ? Colors.black : Colors.white,
-                                  ),
-                                ),
-                                SizedBox(height: 4),
-                                Text(
-                                  time,
-                                  style: TextStyle(
-                                    color: isMe ? Colors.black54 : Colors.grey[400],
-                                    fontSize: 10,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                );
-              },
-            ),
-          ),
+          Expanded(child: _buildMessageList()),
           Container(
             padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
@@ -354,14 +352,18 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
               border: Border(
                 top: BorderSide(
                   color: Colors.deepOrange.withOpacity(0.2),
-                  width: 1,
                 ),
               ),
             ),
             child: Row(
               children: [
                 IconButton(
-                  icon: Icon(Icons.image, color: Colors.deepOrange[300]),
+                  icon: FaIcon(FontAwesomeIcons.image, color: Colors.deepOrange[300]),
+                  onPressed: _pickAndSendImage,
+                ),
+
+                IconButton(
+                  icon: FaIcon(FontAwesomeIcons.microphone, color: Colors.deepOrange[300]),
                   onPressed: () {},
                 ),
                 IconButton(
@@ -379,7 +381,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                       controller: _messageController,
                       style: TextStyle(color: Colors.white),
                       decoration: InputDecoration(
-                        hintText: 'Type a message...',
+                        hintText: 'Type a dark whisper...',
                         hintStyle: TextStyle(color: Colors.grey[500]),
                         border: InputBorder.none,
                       ),
@@ -387,43 +389,22 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                   ),
                 ),
                 SizedBox(width: 8),
-                AnimatedBuilder(
-                  animation: _sendButtonController,
-                  builder: (context, child) {
-                    return Transform.scale(
-                      scale: _sendButtonScale.value,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                            colors: [
-                              Colors.deepOrange,
-                              Colors.deepOrange[800]!,
-                            ],
-                          ),
-                        ),
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            Opacity(
-                              opacity: _micButtonOpacity.value,
-                              child: IconButton(
-                                icon: Icon(Icons.mic, color: Colors.white),
-                                onPressed: () {},
-                              ),
-                            ),
-                            Opacity(
-                              opacity: _sendButtonOpacity.value,
-                              child: IconButton(
-                                icon: Icon(Icons.send, color: Colors.white),
-                                onPressed: _sendMessage,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
+                Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [Colors.deepOrange, Colors.deepOrange[800]!],
+                    ),
+                  ),
+                  child: IconButton(
+                    icon: Icon(Icons.send, color: Colors.white),
+                    onPressed: () {
+                      if (_messageController.text.isNotEmpty) {
+                        _sendMessage(_messageController.text);
+                        _messageController.clear();
+                      }
+                    },
+                  ),
                 ),
               ],
             ),

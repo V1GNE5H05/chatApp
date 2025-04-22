@@ -46,6 +46,9 @@ class _SignupScreenState extends State<SignupScreen> {
             'email': _emailController.text.trim(),
             'uid': user.uid,
             'createdAt': Timestamp.now(),
+            'username':_nameController.text.trim(),
+            'bio': "Nice to see you friend!",
+            'profileImage': ""
           });
 
           // Create an entry in the 'friends' collection

@@ -35,22 +35,32 @@ void handleConnection(WebSocket socket) {
           } else {
             socket.add(jsonEncode({'error': 'Invalid or missing uid'}));
           }
-        } else if (data['type'] == 'message') {
+        }
+
+        else if (data['type'] == 'message') {
           final to = data['to'];
           final text = data['text'];
-          if (to is String && to.isNotEmpty && text is String) {
+
+          if (to is String && to.isNotEmpty && text is String && uid != null) {
             print('📤 $uid sent message to $to: $text');
+
+            final messagePayload = jsonEncode({
+              'type': 'message',
+              'from': uid,
+              'text': text,
+              'timestamp': DateTime.now().toIso8601String(),
+            });
+
+            // Send to receiver
             if (connectedClients.containsKey(to)) {
-              connectedClients[to]!.add(jsonEncode({
-                'type': 'message',
-                'from': uid,
-                'text': text,
-                'timestamp': DateTime.now().toIso8601String(),
-              }));
+              connectedClients[to]!.add(messagePayload);
               print('✅ Delivered to $to');
             } else {
-              print('❌ $to is not connected');
+              print('❌ $to not connected');
             }
+
+            // Also send to sender (to reflect sent message on their screen)
+            connectedClients[uid!]!.add(messagePayload);
           } else {
             socket.add(jsonEncode({'error': 'Invalid message format'}));
           }
@@ -66,6 +76,8 @@ void handleConnection(WebSocket socket) {
         print('🔌 $uid disconnected');
       }
     },
-    onError: (e) => print('⚠️ Error: $e'),
+    onError: (e) {
+      print('⚠️ WebSocket error: $e');
+    },
   );
 }

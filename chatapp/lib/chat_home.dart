@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:chatapp/game/brick/brickmain.dart';
+import 'package:chatapp/groups/grou_home_page.dart';
 import 'package:chatapp/page/settings_page.dart';
 import 'package:chatapp/screens/chat_screen.dart';
 import 'package:chatapp/screens/login_screen.dart';
@@ -95,70 +96,69 @@ class _ChatHomePageState extends State<ChatHomePage>
     );
   }
 
- Widget _buildUserList() {
-  final myUid = FirebaseAuth.instance.currentUser!.uid;
+  Widget _buildUserList() {
+    final myUid = FirebaseAuth.instance.currentUser!.uid;
 
-  return StreamBuilder<QuerySnapshot>(
-    stream: FirebaseFirestore.instance.collection('users').snapshots(),
-    builder: (context, snapshot) {
-      if (snapshot.connectionState == ConnectionState.waiting) {
-        return Center(
-          child: CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.deepOrange),
-          ),
-        );
-      }
-
-      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-        return _buildEmptyState(FontAwesomeIcons.userSlash, 'No souls found');
-      }
-
-      // Get the list of users the current user has messaged
-      return StreamBuilder<DocumentSnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('friends')
-            .doc(myUid)
-            .snapshots(),
-        builder: (context, friendsSnapshot) {
-          if (!friendsSnapshot.hasData || !friendsSnapshot.data!.exists) {
-            return _buildEmptyState(FontAwesomeIcons.search, 'No matching spirits');
-          }
-
-          List<dynamic> friendsList = friendsSnapshot.data!['friends'] ?? [];
-          
-          // Filter the users based on the friends list
-          final allUsers = snapshot.data!.docs
-              .where((doc) => doc['uid'] != myUid && friendsList.contains(doc['uid']))
-              .toList();
-
-          final filteredUsers = allUsers.where((doc) {
-            final name = doc['name'].toString().toLowerCase();
-            return _searchQuery.isEmpty || name.contains(_searchQuery.toLowerCase());
-          }).toList();
-
-          if (filteredUsers.isEmpty) {
-            return _buildEmptyState(FontAwesomeIcons.search, 'No matching spirits');
-          }
-
-          return ListView.separated(
-            physics: AlwaysScrollableScrollPhysics(),
-            padding: EdgeInsets.symmetric(vertical: 8),
-            itemCount: filteredUsers.length,
-            separatorBuilder: (_, __) => Divider(
-              color: Colors.deepOrange.withOpacity(0.1),
-              height: 1,
-              indent: 72,
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('users').snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.deepOrange),
             ),
-            itemBuilder: (context, index) {
-              final user = filteredUsers[index];
-              return _buildUserTile(user);
-            },
           );
-        },
-      );
-    },
-  );
-}
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return _buildEmptyState(FontAwesomeIcons.userSlash, 'No souls found');
+        }
+
+        return StreamBuilder<DocumentSnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('friends')
+              .doc(myUid)
+              .snapshots(),
+          builder: (context, friendsSnapshot) {
+            if (!friendsSnapshot.hasData || !friendsSnapshot.data!.exists) {
+              return _buildEmptyState(FontAwesomeIcons.search, 'No matching spirits');
+            }
+
+            List<dynamic> friendsList = friendsSnapshot.data!['uids'] ?? [];
+
+            final allUsers = snapshot.data!.docs
+                .where((doc) => doc['uid'] != myUid && friendsList.contains(doc['uid']))
+                .toList();
+
+            final filteredUsers = allUsers.where((doc) {
+              final name = doc['name'].toString().toLowerCase();
+              return _searchQuery.isEmpty || name.contains(_searchQuery.toLowerCase());
+            }).toList();
+
+            if (filteredUsers.isEmpty) {
+              return _buildEmptyState(FontAwesomeIcons.search, 'No matching spirits');
+            }
+
+            return ListView.separated(
+              physics: AlwaysScrollableScrollPhysics(),
+              padding: EdgeInsets.symmetric(vertical: 8),
+              itemCount: filteredUsers.length,
+              separatorBuilder: (_, __) => Divider(
+                color: Colors.deepOrange.withOpacity(0.1),
+                height: 1,
+                indent: 72,
+              ),
+              itemBuilder: (context, index) {
+                final user = filteredUsers[index];
+                return _buildUserTile(user);
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildEmptyState(IconData icon, String message) {
     return Center(
       child: Column(
@@ -230,37 +230,6 @@ class _ChatHomePageState extends State<ChatHomePage>
             ),
           );
         },
-      ),
-    );
-  }
-
-  Widget _buildGroupsTab() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          FaIcon(
-            FontAwesomeIcons.usersSlash,
-            color: Colors.deepOrange.withOpacity(0.5),
-            size: 50,
-          ),
-          SizedBox(height: 20),
-          Text(
-            'NO CULTS YET',
-            style: TextStyle(
-              color: Colors.deepOrange[200],
-              fontSize: 18,
-              letterSpacing: 2,
-            ),
-          ),
-          Text(
-            'Gather your followers...',
-            style: TextStyle(
-              color: Colors.grey[600],
-              fontStyle: FontStyle.italic,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -375,7 +344,7 @@ class _ChatHomePageState extends State<ChatHomePage>
                 controller: _tabController,
                 children: [
                   _buildUserList(),
-                  _buildGroupsTab(),
+                  GroupHomePage(),
                   const Games(),
                 ],
               ),
