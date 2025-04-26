@@ -77,6 +77,7 @@ flutter:
     # Avengers character cards
     - assets/brick_breaker.png
     - assets/ironman.png
+    - assets/default_profile.png
     - assets/captain_america.png
     - assets/thor.png
     - assets/hulk.png

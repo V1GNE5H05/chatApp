@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:chatapp/game/brick/brickmain.dart';
-import 'package:chatapp/groups/grou_home_page.dart';
+import 'package:chatapp/groups/group_home_page.dart';
 import 'package:chatapp/page/settings_page.dart';
 import 'package:chatapp/screens/chat_screen.dart';
 import 'package:chatapp/screens/login_screen.dart';
@@ -179,60 +179,77 @@ class _ChatHomePageState extends State<ChatHomePage>
   }
 
   Widget _buildUserTile(QueryDocumentSnapshot user) {
-    return Container(
-      margin: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.grey[900],
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.deepOrange.withOpacity(0.1),
-            blurRadius: 6,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: Colors.black,
-          child: Text(
-            user['name'][0].toUpperCase(),
-            style: TextStyle(
-              color: Colors.deepOrange[200],
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-        title: Text(
-          user['name'],
-          style: TextStyle(
-            color: Colors.deepOrange[100],
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        subtitle: Text(
-          user['email'],
-          style: TextStyle(color: Colors.grey[500]),
-        ),
-        trailing: FaIcon(
-          FontAwesomeIcons.arrowRight,
-          color: Colors.deepOrange,
-          size: 16,
-        ),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => ChatScreen(
-                friendUid: user['uid'],
-                friendName: user['name'],
-              ),
-            ),
-          );
-        },
-      ),
-    );
+  final profileImageBase64 = user['profileImage'];
+  ImageProvider? profileImage;
+
+  if (profileImageBase64 != null &&
+      profileImageBase64.toString().isNotEmpty &&
+      profileImageBase64 != 'null') {
+    try {
+      final imageBytes = base64Decode(profileImageBase64);
+      profileImage = MemoryImage(imageBytes);
+    } catch (e) {
+      profileImage = null;
+    }
   }
+
+  return Container(
+    margin: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+    decoration: BoxDecoration(
+      color: Colors.grey[900],
+      borderRadius: BorderRadius.circular(12),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.deepOrange.withOpacity(0.1),
+          blurRadius: 6,
+          offset: Offset(0, 2),
+        ),
+      ],
+    ),
+    child: ListTile(
+      leading: CircleAvatar(
+        backgroundColor: Colors.black,
+        backgroundImage: profileImage,
+        child: profileImage == null
+            ? Text(
+                user['name'][0].toUpperCase(),
+                style: TextStyle(
+                  color: Colors.deepOrange[200],
+                  fontWeight: FontWeight.bold,
+                ),
+              )
+            : null,
+      ),
+      title: Text(
+        user['name'],
+        style: TextStyle(
+          color: Colors.deepOrange[100],
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      subtitle: Text(
+        user['email'],
+        style: TextStyle(color: Colors.grey[500]),
+      ),
+      trailing: FaIcon(
+        FontAwesomeIcons.arrowRight,
+        color: Colors.deepOrange,
+        size: 16,
+      ),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ChatScreen(
+              friendUid: user['uid'],
+              friendName: user['name'],
+            ),
+          ),
+        );
+      },
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {

@@ -50,11 +50,10 @@ class _ChatScreenState extends State<ChatScreen> {
           timestamp: data['timestamp'],
           isImage: data['isImage'] ?? false,
         );
-         _updateFriendsCollection(data['sender'], data['receiver']);
+        _updateFriendsCollection(data['sender'], data['receiver']);
       }
     });
   }
-
 
   void _sendMessage(String message) {
     final timestamp = DateTime.now().toIso8601String();
@@ -73,7 +72,6 @@ class _ChatScreenState extends State<ChatScreen> {
       timestamp: timestamp,
     );
     _updateFriendsCollection(currentUserUid, widget.friendUid);
-
   }
 
   void _storeMessageInFirestore({
@@ -92,21 +90,22 @@ class _ChatScreenState extends State<ChatScreen> {
       'isImage': isImage,
     });
   }
+
   Future<void> _updateFriendsCollection(String senderUid, String receiverUid) async {
-  final firestore = FirebaseFirestore.instance;
+    final firestore = FirebaseFirestore.instance;
 
-  // Update sender's friends list
-  final senderRef = firestore.collection('friends').doc(senderUid);
-  await senderRef.set({
-    'uids': FieldValue.arrayUnion([receiverUid])
-  }, SetOptions(merge: true));
+    // Update sender's friends list
+    final senderRef = firestore.collection('friends').doc(senderUid);
+    await senderRef.set({
+      'uids': FieldValue.arrayUnion([receiverUid])
+    }, SetOptions(merge: true));
 
-  // Update receiver's friends list
-  final receiverRef = firestore.collection('friends').doc(receiverUid);
-  await receiverRef.set({
-    'uids': FieldValue.arrayUnion([senderUid])
-  }, SetOptions(merge: true));
-}
+    // Update receiver's friends list
+    final receiverRef = firestore.collection('friends').doc(receiverUid);
+    await receiverRef.set({
+      'uids': FieldValue.arrayUnion([senderUid])
+    }, SetOptions(merge: true));
+  }
 
   @override
   void dispose() {
@@ -128,35 +127,138 @@ class _ChatScreenState extends State<ChatScreen> {
     if (difference == 1) return 'Yesterday';
     return DateFormat('MMMM dd, yyyy').format(date);
   }
+
   Future<void> _pickAndSendImage() async {
-  final picker = ImagePicker();
-  final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
 
-  if (pickedFile != null) {
-    final bytes = await pickedFile.readAsBytes();
-    final base64Image = base64Encode(bytes);
+    if (pickedFile != null) {
+      final bytes = await pickedFile.readAsBytes();
+      final base64Image = base64Encode(bytes);
 
-    final timestamp = DateTime.now().toIso8601String();
-    final messageData = {
-      'type': 'message',
-      'sender': currentUserUid,
-      'receiver': widget.friendUid,
-      'text': base64Image,
-      'isImage': true,
-      'timestamp': timestamp,
-    };
+      final timestamp = DateTime.now().toIso8601String();
+      final messageData = {
+        'type': 'message',
+        'sender': currentUserUid,
+        'receiver': widget.friendUid,
+        'text': base64Image,
+        'isImage': true,
+        'timestamp': timestamp,
+      };
 
-    _webSocketChannel.sink.add(jsonEncode(messageData));
+      _webSocketChannel.sink.add(jsonEncode(messageData));
 
-    _storeMessageInFirestore(
-      sender: currentUserUid,
-      receiver: widget.friendUid,
-      text: base64Image,
-      timestamp: timestamp,
-      isImage: true,
+      _storeMessageInFirestore(
+        sender: currentUserUid,
+        receiver: widget.friendUid,
+        text: base64Image,
+        timestamp: timestamp,
+        isImage: true,
+      );
+    }
+  }
+  void _showEditDialog(QueryDocumentSnapshot message) {
+  TextEditingController _editController = TextEditingController(text: message['text']);
+
+  showDialog(
+    context: context,
+    builder: (context) {
+      return Dialog(
+        backgroundColor: Colors.grey.shade900,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Edit Message',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 20),
+              TextField(
+                controller: _editController,
+                style: TextStyle(color: Colors.white),
+                cursorColor: Colors.blueAccent,
+                decoration: InputDecoration(
+                  hintText: 'Edit your message',
+                  hintStyle: TextStyle(color: Colors.white54),
+                  filled: true,
+                  fillColor: Colors.grey.shade800,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white70,
+                    ),
+                    onPressed: () => Navigator.pop(context),
+                    child: Text('Cancel'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blueAccent,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    onPressed: () async {
+                      String editedMessage = _editController.text.trim();
+                      if (editedMessage.isNotEmpty) {
+                        await FirebaseFirestore.instance
+                            .collection('messages')
+                            .doc(message.id)
+                            .update({'text': editedMessage});
+                      }
+                      Navigator.pop(context);
+                    },
+                    child: Text('Save'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+} 
+  void _showInfoDialog(QueryDocumentSnapshot message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Message Info'),
+        content: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Sender: ${message['sender']}'),
+            Text('Receiver: ${message['receiver']}'),
+            Text('Timestamp: ${_formatTimestamp(message['timestamp'])}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            child: Text('Close'),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ],
+      ),
     );
   }
-}
 
   Widget _buildMessageList() {
     final sentMessagesQuery = FirebaseFirestore.instance
@@ -228,71 +330,115 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                     ...messages.map((message) {
                       final isMe = message['sender'] == currentUserUid;
-                      return Container(
-                        margin: EdgeInsets.symmetric(vertical: 4),
-                        child: Row(
-                          mainAxisAlignment: isMe
-                              ? MainAxisAlignment.end
-                              : MainAxisAlignment.start,
-                          children: [
-                            if (!isMe)
-                              Padding(
-                                padding: const EdgeInsets.only(right: 8),
-                                child: CircleAvatar(
-                                  backgroundColor: Colors.deepOrange[800],
-                                  child: FaIcon(
-                                    FontAwesomeIcons.skull,
-                                    color: Colors.black,
-                                    size: 16,
+                      return GestureDetector(
+                        onLongPress: () {
+                          if (message['sender'] == currentUserUid) {
+                            showDialog(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: Text('Message Options'),
+                                content: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    ListTile(
+                                      leading: Icon(Icons.delete, color: Colors.red),
+                                      title: Text('Remove'),
+                                      onTap: () async {
+                                        Navigator.pop(context);
+                                        await FirebaseFirestore.instance
+                                        .collection('messages')
+                                        .doc(message.id)
+                                        .delete();
+                                      },
+                                    ),
+                                    ListTile(
+                                      leading: Icon(Icons.edit, color: Colors.blue),
+                                      title: Text('Edit'),
+                                      onTap: () {
+                                        Navigator.pop(context);
+                                        _showEditDialog(message);
+                                      },
+                                    ),
+                                    ListTile(
+                                      leading: Icon(Icons.info, color: Colors.grey),
+                                      title: Text('Info'),
+                                      onTap: () {
+                                        Navigator.pop(context);
+                                        _showInfoDialog(message);
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                        child: Container(
+                          margin: EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            mainAxisAlignment: isMe
+                                ? MainAxisAlignment.end
+                                : MainAxisAlignment.start,
+                            children: [
+                              if (!isMe)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 8),
+                                  child: CircleAvatar(
+                                    backgroundColor: Colors.deepOrange[800],
+                                    child: FaIcon(
+                                      FontAwesomeIcons.skull,
+                                      color: Colors.black,
+                                      size: 16,
+                                    ),
+                                  ),
+                                ),
+                              Flexible(
+                                child: Container(
+                                  margin: EdgeInsets.symmetric(horizontal: 12),
+                                  padding: EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: isMe
+                                        ? Colors.deepOrange[700]
+                                        : Colors.grey[800],
+                                    borderRadius: BorderRadius.circular(16),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black26,
+                                        blurRadius: 4,
+                                        offset: Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      message['isImage'] == true
+                                          ? Image.memory(
+                                              base64Decode(message['text']),
+                                              width: 200,
+                                            )
+                                          : Text(
+                                              message['text'],
+                                              style: TextStyle(
+                                                color: isMe ? Colors.black : Colors.white,
+                                              ),
+                                            ),
+                                      SizedBox(height: 4),
+                                      Text(
+                                        _formatTimestamp(message['timestamp']),
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: isMe
+                                              ? Colors.black.withOpacity(0.6)
+                                              : Colors.grey[400],
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
-                            Flexible(
-                              child: Container(
-                                margin: EdgeInsets.symmetric(horizontal: 12),
-                                padding: EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: isMe
-                                      ? Colors.deepOrange[700]
-                                      : Colors.grey[800],
-                                  borderRadius: BorderRadius.circular(16),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black26,
-                                      blurRadius: 4,
-                                      offset: Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    message['isImage'] == true
-                                    ? Image.memory(
-                                      base64Decode(message['text']),
-                                      width: 200,
-                                    )
-                                    : Text(
-                                      message['text'],
-                                      style: TextStyle(
-                                        color: isMe ? Colors.black : Colors.white,
-                                      ),
-                                    ),
-                                    SizedBox(height: 4),
-                                    Text(
-                                      _formatTimestamp(message['timestamp']),
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        color: isMe
-                                            ? Colors.black.withOpacity(0.6)
-                                            : Colors.grey[400],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       );
                     }).toList(),
@@ -362,7 +508,6 @@ class _ChatScreenState extends State<ChatScreen> {
                   icon: FaIcon(FontAwesomeIcons.image, color: Colors.deepOrange[300]),
                   onPressed: _pickAndSendImage,
                 ),
-
                 IconButton(
                   icon: FaIcon(FontAwesomeIcons.microphone, color: Colors.deepOrange[300]),
                   onPressed: () {},
@@ -390,27 +535,64 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 ),
                 SizedBox(width: 8),
-                Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      colors: [Colors.deepOrange, Colors.deepOrange[800]!],
+                GestureDetector(
+                  onTap: () {
+                    if (_messageController.text.trim().isNotEmpty) {
+                      _sendMessage(_messageController.text.trim());
+                      _messageController.clear();
+                    }
+                  },
+                  child: AnimatedContainer(
+                    duration: Duration(milliseconds: 200),
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.deepOrange[700],
                     ),
-                  ),
-                  child: IconButton(
-                    icon: Icon(Icons.send, color: Colors.white),
-                    onPressed: () {
-                      if (_messageController.text.isNotEmpty) {
-                        _sendMessage(_messageController.text);
-                        _messageController.clear();
-                      }
-                    },
+                    child: Icon(Icons.send, color: Colors.black),
                   ),
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class PopupItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const PopupItem({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    Key? key,
+  }) : super(key: key);
+  
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 8),
+        child: Row(
+          children: [
+            Icon(icon, color: Colors.white70),
+            const SizedBox(width: 16),
+            Text(
+              label,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

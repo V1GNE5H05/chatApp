@@ -1,7 +1,12 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:chatapp/groups/group_info_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 class GroupChatScreen extends StatefulWidget {
@@ -38,6 +43,35 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     _nameCache[senderId] = userName;
     return userName;
   }
+  Future<String?> pickImageAsBase64() async {
+  final picker = ImagePicker();
+  final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+
+  if (pickedFile != null) {
+    final bytes = await File(pickedFile.path).readAsBytes();
+    return base64Encode(bytes);
+  }
+  return null;
+}
+  void sendImageMessageToGroup(String groupId, String senderId) async {
+  final base64Image = await pickImageAsBase64();
+
+  if (base64Image != null) {
+    final message = {
+      'senderId': senderId,
+      'text': '', // No text
+      'image': base64Image,
+      'timestamp': DateTime.now(),
+      'type': 'image',
+    };
+
+    await FirebaseFirestore.instance
+        .collection('groupChats')
+        .doc(groupId)
+        .collection('messages')
+        .add(message);
+  }
+}
 
   // Send message
   void _sendMessage() async {
@@ -97,6 +131,25 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             IconButton(
               icon: FaIcon(FontAwesomeIcons.ghost, color: Colors.deepOrange[100]),
               onPressed: () {},
+            ),
+            PopupMenuButton<String>(
+              icon: Icon(Icons.more_vert, color: Colors.white),
+              onSelected: (value) {
+                if (value == 'group_info') {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => GroupInfoScreen(groupId: widget.groupId),
+                    ),
+                  );
+                }
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: 'group_info',
+                  child: Text("Group Info"),
+                ),
+              ],
             ),
           ],
         ),
@@ -221,7 +274,11 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             child: Row(
               children: [
-                Icon(Icons.image, color: Colors.orange),
+                IconButton(
+                  icon: Icon(Icons.image),
+                  onPressed: () => sendImageMessageToGroup(widget.groupId, currentUserUid),
+                ),
+
                 SizedBox(width: 8),
                 Text("💀", style: TextStyle(fontSize: 22)),
                 SizedBox(width: 8),
